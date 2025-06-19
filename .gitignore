@@ -1,1 +1,24 @@
-".env" 
+# Ignore environment files
+.env
+
+# Ignore all node_modules folders
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build outputs
+dist/
+.vite/
+
+# IDE files
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
