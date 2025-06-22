@@ -60,8 +60,16 @@ app.post("/login", async (req, res) => {
 // Create a new table
 app.post("/table", authenticate, async (req, res) => {
   const { tableName, fields } = req.body;
+
   if (!tableName || !fields.every(f => f.name)) {
-    return res.status(400).json({ error: "Table name and all field names required" });
+    return res.status(400).json({ error: "Table name and all field names are required" });
+  }
+
+  const fieldNames = fields.map(f => f.name.trim());
+  const uniqueNames = new Set(fieldNames);
+
+  if (fieldNames.length !== uniqueNames.size) {
+    return res.status(400).json({ error: "Field names must be unique" });
   }
 
   const table = await DynamicTable.create({
@@ -96,10 +104,44 @@ app.delete("/table/:id", authenticate, async (req, res) => {
   res.json({ message: "Table deleted" });
 });
 
+// Update table fields (columns)
+app.put("/table/:id/fields", authenticate, async (req, res) => {
+  const { fields } = req.body;
+  if (!fields || !Array.isArray(fields) || fields.some(f => !f.name)) {
+    return res.status(400).json({ error: "All fields must have a name." });
+  }
+
+  const table = await DynamicTable.findOne({ _id: req.params.id, userId: req.userId });
+  if (!table) return res.status(404).json({ error: "Table not found" });
+
+  // Confirm which fields are being removed
+  const oldFieldNames = table.fields.map(f => f.name);
+  const newFieldNames = fields.map(f => f.name);
+
+  const removedFields = oldFieldNames.filter(name => !newFieldNames.includes(name));
+  if (removedFields.length > 0) {
+    // Remove data for deleted columns from all rows
+    table.rows = table.rows.map(row => {
+      removedFields.forEach(field => delete row[field]);
+      return row;
+    });
+  }
+
+  table.fields = fields;
+  await table.save();
+  res.json({ message: "Fields updated successfully", fields: table.fields });
+});
+
+
 // Add record to table
 app.post("/table/:id/record", authenticate, async (req, res) => {
   const table = await DynamicTable.findOne({ _id: req.params.id, userId: req.userId });
   if (!table) return res.status(404).json({ error: "Table not found" });
+  for (const field of table.fields) {
+    if (field.required && (req.body[field.name] === undefined || req.body[field.name] === "")) {
+      return res.status(400).json({ error: `Field "${field.name}" is required` });
+    }
+  }
   table.rows.push(req.body);
   await table.save();
   res.json({ message: "Record added" });
@@ -118,7 +160,14 @@ app.delete("/table/:id/record/:index", authenticate, async (req, res) => {
 app.put("/table/:id/record/:index", authenticate, async (req, res) => {
   const table = await DynamicTable.findOne({ _id: req.params.id, userId: req.userId });
   if (!table) return res.status(404).json({ error: "Table not found" });
+
+  for (const field of table.fields) {
+    if (field.required && (req.body[field.name] === undefined || req.body[field.name] === "")) {
+      return res.status(400).json({ error: `Field "${field.name}" is required` });
+    }
+  }
   table.rows[req.params.index] = req.body;
+
   await table.save();
   res.json({ message: "Record updated" });
 });

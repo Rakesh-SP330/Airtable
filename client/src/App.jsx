@@ -12,6 +12,8 @@ const App = () => {
   const [selectedTable, setSelectedTable] = useState(null);
   const [recordData, setRecordData] = useState({});
   const [editIndex, setEditIndex] = useState(null);
+  const [isEditingFields, setIsEditingFields] = useState(false);
+
 
   useEffect(() => {
     if (token) fetchTables();
@@ -55,9 +57,17 @@ const App = () => {
 
   const createTable = async () => {
     if (!tableName.trim()) return alert("Table name is required");
-    for (const field of fields) {
-      if (!field.name.trim()) return alert("All field names must be filled");
+
+    const trimmedNames = fields.map(f => f.name.trim());
+
+    if (new Set(trimmedNames).size !== trimmedNames.length) {
+      return alert("Field names must be unique");
     }
+
+    for (const name of trimmedNames) {
+      if (!name) return alert("All field names must be filled");
+    }
+
     const res = await fetch("http://localhost:5000/table", {
       method: "POST",
       headers: {
@@ -101,7 +111,40 @@ const App = () => {
     setSelectedTable(data);
   };
 
+const validateRequiredFields = () => {
+  for (const field of selectedTable.fields) {
+    if (field.required && (recordData[field.name] === undefined || recordData[field.name] === "")) {
+      alert(`Field "${field.name}" is required.`);
+      return false;
+    }
+  }
+  return true;
+};
+
+const updateTableFields = async () => {
+  const res = await fetch(`http://localhost:5000/table/${selectedTable._id}/fields`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ fields: selectedTable.fields }),
+  });
+
+  const data = await res.json();
+  if (data.fields) {
+    alert("Columns updated");
+    fetchTableDetails(selectedTable._id);
+    setIsEditingFields(false);
+  } else {
+    alert("Update failed");
+  }
+};
+
+
+
   const submitRecord = async () => {
+    if (!validateRequiredFields()) return;
     const res = await fetch(`http://localhost:5000/table/${selectedTable._id}/record`, {
       method: "POST",
       headers: {
@@ -134,6 +177,7 @@ const App = () => {
   };
 
   const updateRecord = async () => {
+    if (!validateRequiredFields()) return;
     const res = await fetch(`http://localhost:5000/table/${selectedTable._id}/record/${editIndex}`, {
       method: "PUT",
       headers: {
@@ -196,14 +240,83 @@ const App = () => {
           <li key={t._id}>
             {t.tableName}
             <button onClick={() => fetchTableDetails(t._id)}>View</button>
-            <button onClick={() => deleteTable(t._id)}>Delete</button>
           </li>
         ))}
       </ul>
 
       {selectedTable && (
         <div>
-          <h4>📋 Table: {selectedTable.tableName}</h4>
+          <h4>
+            📋 Table: {selectedTable.tableName}
+            <button onClick={() => setIsEditingFields(!isEditingFields)}>
+              {isEditingFields ? "Done" : "Edit Columns"}
+            </button>
+            <button onClick={() => deleteTable(selectedTable._id)}>Delete Table</button>
+          </h4>
+          {isEditingFields && (
+            <div>
+              <h5>Edit Columns</h5>
+              {selectedTable.fields.map((field, i) => (
+                <div key={i}>
+                  <input
+                    type="text"
+                    value={field.name}
+                    onChange={(e) => {
+                      const updated = [...selectedTable.fields];
+                      updated[i].name = e.target.value;
+                      setSelectedTable({ ...selectedTable, fields: updated });
+                    }}
+                  />
+                  <select
+                    value={field.type}
+                    onChange={(e) => {
+                      const updated = [...selectedTable.fields];
+                      updated[i].type = e.target.value;
+                      setSelectedTable({ ...selectedTable, fields: updated });
+                    }}
+                  >
+                    <option value="text">Text</option>
+                    <option value="number">Number</option>
+                    <option value="date">Date</option>
+                    <option value="checkbox">Checkbox</option>
+                  </select>
+                  <label>
+                    Required
+                    <input
+                      type="checkbox"
+                      checked={field.required}
+                      onChange={(e) => {
+                        const updated = [...selectedTable.fields];
+                        updated[i].required = e.target.checked;
+                        setSelectedTable({ ...selectedTable, fields: updated });
+                      }}
+                    />
+                  </label>
+                  <button
+                    onClick={() => {
+                      const confirmed = window.confirm("Delete this column? This will remove its data from all records.");
+                      if (confirmed) {
+                        const updated = selectedTable.fields.filter((_, idx) => idx !== i);
+                        setSelectedTable({ ...selectedTable, fields: updated });
+                      }
+                    }}
+                  >
+                    ❌
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => {
+                  const updated = [...selectedTable.fields, { name: "", type: "text", required: false }];
+                  setSelectedTable({ ...selectedTable, fields: updated });
+                }}
+              >
+                ➕ Add Column
+              </button>
+              <button onClick={updateTableFields}>💾 Save Changes</button>
+            </div>
+          )}
+          
           <table border="1">
             <thead>
               <tr>
@@ -229,7 +342,9 @@ const App = () => {
           <h4>{editIndex !== null ? "Edit Record" : "Add Record"}</h4>
           {selectedTable.fields.map((f, i) => (
             <div key={i}>
-              <label>{f.name}</label>
+              <label>
+                {f.name} {f.required && <span style={{ color: "red" }}>*</span>}
+              </label>
               <input
                 type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
                 value={recordData[f.name] ?? ""}
